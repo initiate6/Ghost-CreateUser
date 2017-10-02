@@ -6,22 +6,26 @@ import requests
 import argparse
 import json
 import MySQLdb
+import sqlite3
 import time
 
 class createUser(object):
     def __init__(self, config):
         """Initilize createUser and set additonal configuration data."""
         self.config = config
-        self.db = MySQLdb.connect(host=self.config['mysql']['host'],
-                     user=self.config['mysql']['user'],
-                     passwd=self.config['mysql']['password'],
-                     db=self.config['mysql']['database'])
+        if 'mysql' in config:
+            self.db = MySQLdb.connect(host=self.config['mysql']['host'],
+                        user=self.config['mysql']['user'],
+                        passwd=self.config['mysql']['password'],
+                        db=self.config['mysql']['database'])
+        elif 'sqlite3' in config:
+            self.db = sqlite3.connect(self.config['sqlite3']['path'])
 
         self.cur = self.db.cursor()
         self.cur.execute("SELECT secret FROM clients WHERE slug='ghost-admin'")
         self.config['secret'] = self.cur.fetchone()[0]
-        sql = "SELECT `id` FROM `roles` WHERE `name`=%s"
-        self.cur.execute(sql, (config['role_name'],))
+        sql = "SELECT `id` FROM `roles` WHERE `name`='%s'"
+        self.cur.execute(sql%(config['role_name'],))
         self.config['role_id'] = self.cur.fetchone()[0]
 
 
@@ -63,12 +67,15 @@ class createUser(object):
             print('Invite for %s created successfully.' % (self.config['email']) )
         else:
             print('Invite for %s failed. Error: %s' % (self.config['email'], r.text) )
+            print('Manually setting invitation status to sent')
+            sql = "UPDATE `invites` SET `status`='sent' WHERE `email`='%s'"
+            self.cur.execute(sql%(self.config['email'],))
 
 
     def mysqlGetInvite(self):
         self.db.commit()
-        sql = "SELECT `token` FROM `invites` WHERE `email`=%s"
-        self.cur.execute(sql, (self.config['email'],))
+        sql = "SELECT `token` FROM `invites` WHERE `email`='%s'"
+        self.cur.execute(sql%(self.config['email'],))
         token = self.cur.fetchone()[0]
         self.config['invite_token'] = token
         self.config['invite_url'] = token.rstrip('=')
@@ -102,7 +109,6 @@ class createUser(object):
             print('User: %s was successfully setup.' % (self.config['name']) )
         else:
             print('User: %s failed to be setup.' % (self.config['name']) )
-
         self.db.close()
 
 
@@ -139,12 +145,17 @@ if __name__ == '__main__':
         config['mysql']['user'] = json_data['database']['connection']['user']
         config['mysql']['password'] = json_data['database']['connection']['password']
         config['mysql']['host'] = json_data['database']['connection']['host']
-    #else:
-        #add support for sqlite
+    elif json_data['database']['client'] == 'sqlite3':
+        config['sqlite3'] = {}
+
+        #Assuming path in config is relative to config file path
+        rel_path = json_data['database']['connection']['filename']
+        base_path = os.path.dirname(os.path.abspath(config['config_file']))
+        config['sqlite3']['path'] = os.path.abspath(os.path.join(base_path,rel_path))
 
     config['admin'] = opt.admin
     config['admin_password'] = opt.admin_password
-    config['base_url'] = 'https://127.0.0.1' #json_data['url']
+    config['base_url'] = json_data['url']
     config['name'] = opt.name
     config['email'] = opt.email
     config['password'] = opt.password
